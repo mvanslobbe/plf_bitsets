@@ -97,8 +97,9 @@ private:
 
 public:
 
-	PLF_CONSTFUNC bitsetb(const size_type size, storage_type * const supplied_buffer = NULL):
-		buffer((user_supplied_buffer) ? supplied_buffer : PLF_ALLOCATE(allocator_type, *this, PLF_ARRAY_CAPACITY_CALC(size), this)),
+	template <bool USE = user_supplied_buffer, typename std::enable_if<!USE, int>::type = 0>
+	explicit PLF_CONSTFUNC bitsetb(const size_type size):
+		buffer(PLF_ALLOCATE(allocator_type, *this, PLF_ARRAY_CAPACITY_CALC(size), this)),
 		total_size(size)
 	{
 		reset();
@@ -106,6 +107,24 @@ public:
 
 
 
+	template <bool USE = user_supplied_buffer, typename std::enable_if<USE, int>::type = 0>
+	PLF_CONSTFUNC bitsetb(const size_type size, storage_type * const supplied_buffer):
+		buffer(supplied_buffer),
+		total_size(size)
+	{
+		#ifdef PLF_EXCEPTIONS_SUPPORT
+			if (supplied_buffer == NULL) throw std::invalid_argument("user_supplied_buffer set to true, but supplied_buffer is NULL");
+		#else
+			if (supplied_buffer == NULL) std::terminate();
+		#endif
+
+		reset();
+	}
+
+
+
+	// A copy constructor cannot be a template (a templated constructor is never treated as a copy constructor), so this single overload
+	// serves both user_supplied_buffer states: for false the buffer parameter is ignored, for true it is required at runtime if NULL.
 	PLF_CONSTFUNC bitsetb(const bitsetb &source, storage_type * const supplied_buffer = NULL):
 		#ifdef PLF_CPP11_SUPPORT
 			allocator_type(std::allocator_traits<allocator_type>::select_on_container_copy_construction(source)),
@@ -115,6 +134,12 @@ public:
 		buffer((user_supplied_buffer) ? supplied_buffer : PLF_ALLOCATE(allocator_type, *this, PLF_ARRAY_CAPACITY_CALC(source.total_size), this)),
 		total_size(source.total_size)
 	{
+		#ifdef PLF_EXCEPTIONS_SUPPORT
+			if (user_supplied_buffer && supplied_buffer == NULL) throw std::invalid_argument("user_supplied_buffer set to true, but supplied_buffer is NULL");
+		#else
+			if (user_supplied_buffer && supplied_buffer == NULL) std::terminate();
+		#endif
+
 		std::uninitialized_copy(source.buffer, source.buffer + PLF_ARRAY_CAPACITY_CALC(source.total_size), buffer);
 		set_overflow_to_zero();
 	}

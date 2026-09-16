@@ -1,4 +1,5 @@
 #include <cstdio>
+#include <type_traits>
 #include "plf_bitsetb.h"
 
 
@@ -170,6 +171,40 @@ int main()
 		}
 
 		message("String comparison test passed");
+
+		// Compile-time: bitsetb<true> size ctor requires a user-supplied buffer
+		static_assert(!std::is_constructible<plf::bitsetb<true>, std::size_t>::value, "bitsetb<true> size ctor must require a user-supplied buffer");
+
+		// Header undefines PLF_EXCEPTIONS_SUPPORT at end of plf_tools.h, so test compiler state directly
+		#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND) // explicit NULL is still rejected; without exceptions it terminates, not testable in-suite
+			message("Construction with explicit NULL buffer (regression)\n");
+
+			bool threw = false;
+
+			try
+			{
+				plf::bitsetb<true> null_ctor(134, NULL); // explicit NULL, not the default
+			}
+			catch (const std::invalid_argument &)
+			{
+				threw = true;
+			}
+
+			failpass("size ctor rejects NULL buffer", threw);
+
+			threw = false;
+
+			try
+			{
+				plf::bitsetb<true> null_copy_ctor(values, NULL); // explicit NULL, not the default
+			}
+			catch (const std::invalid_argument &)
+			{
+				threw = true;
+			}
+
+			failpass("copy ctor rejects NULL buffer", threw);
+		#endif
 
 		failpass("All test", or_values.all() && !values.all() && !flip_values.all() && !and_values.all());
 
