@@ -95,10 +95,20 @@ private:
 	}
 
 
+	struct disallowed_size
+	{
+		operator size_type() const { return 0; }
+	};
+
+	struct disallowed_buffer
+	{
+		operator storage_type*() const { return NULL; }
+	};
+
+
 public:
 
-	template <bool USE = user_supplied_buffer, typename std::enable_if<!USE, int>::type = 0>
-	explicit PLF_CONSTFUNC bitsetb(const size_type size):
+	explicit PLF_CONSTFUNC bitsetb(typename plf::conditional<!user_supplied_buffer, size_type, disallowed_size>::type size):
 		buffer(PLF_ALLOCATE(allocator_type, *this, PLF_ARRAY_CAPACITY_CALC(size), this)),
 		total_size(size)
 	{
@@ -107,8 +117,7 @@ public:
 
 
 
-	template <bool USE = user_supplied_buffer, typename std::enable_if<USE, int>::type = 0>
-	PLF_CONSTFUNC bitsetb(const size_type size, storage_type * const supplied_buffer):
+	PLF_CONSTFUNC bitsetb(const size_type size, typename plf::conditional<user_supplied_buffer, storage_type * const, disallowed_buffer>::type supplied_buffer):
 		buffer(supplied_buffer),
 		total_size(size)
 	{

@@ -1,5 +1,8 @@
+#include "plf_tools.h"
 #include <cstdio>
-#include <type_traits>
+#ifdef PLF_CPP11_SUPPORT
+	#include <type_traits>
+#endif
 #include "plf_bitsetb.h"
 
 
@@ -172,11 +175,15 @@ int main()
 
 		message("String comparison test passed");
 
-		// Compile-time: bitsetb<true> size ctor requires a user-supplied buffer
-		static_assert(!std::is_constructible<plf::bitsetb<true>, std::size_t>::value, "bitsetb<true> size ctor must require a user-supplied buffer");
+		#ifdef PLF_CPP11_SUPPORT
+			// Compile-time: bitsetb<true> size ctor requires a user-supplied buffer
+			static_assert(!std::is_constructible<plf::bitsetb<true>, std::size_t>::value, "bitsetb<true> size ctor must require a user-supplied buffer");
+			static_assert(std::is_constructible<plf::bitsetb<false>, std::size_t>::value, "bitsetb<false> size ctor must accept size");
+			static_assert(std::is_constructible<plf::bitsetb<true>, std::size_t, std::size_t*>::value, "bitsetb<true> size ctor must accept user buffer");
+			static_assert(!std::is_constructible<plf::bitsetb<false>, std::size_t, std::size_t*>::value, "bitsetb<false> size ctor must not accept user buffer");
+		#endif
 
-		// Header undefines PLF_EXCEPTIONS_SUPPORT at end of plf_tools.h, so test compiler state directly
-		#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND) // explicit NULL is still rejected; without exceptions it terminates, not testable in-suite
+		#ifdef PLF_EXCEPTIONS_SUPPORT
 			message("Construction with explicit NULL buffer (regression)\n");
 
 			bool threw = false;
