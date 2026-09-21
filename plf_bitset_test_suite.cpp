@@ -477,6 +477,21 @@ int main()
 	}
 
 
+	{
+		// The zero-searching functions reach countr_one/countl_one, which complement their
+		// argument. With a storage_type narrower than int the complement promotes to int, so
+		// these instantiate the count helpers with a signed type:
+		plf::bitset<1000, unsigned char> values;
+		values.set();
+		values.reset(700);
+
+		failpass("Narrow storage_type first_zero test", values.first_zero() == 700);
+		failpass("Narrow storage_type next_zero test", values.next_zero(0) == 700 && values.next_zero(700) == 700);
+		failpass("Narrow storage_type last_zero test", values.last_zero() == 700);
+		failpass("Narrow storage_type prev_zero test", values.prev_zero(999) == 700 && values.prev_zero(701) == 700);
+	}
+
+
 	printf("Press ENTER to quit");
 	getchar();
 	return 0;
