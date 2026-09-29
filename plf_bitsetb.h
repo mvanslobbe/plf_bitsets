@@ -66,8 +66,7 @@ private:
 
 	PLF_CONSTFUNC void set_overflow_to_one() PLF_NOEXCEPT
 	{ // set all bits > size to 1
-		const storage_type shift = PLF_ARRAY_CAPACITY_BITS - total_size;
-		buffer[PLF_ARRAY_CAPACITY - 1] |= std::numeric_limits<storage_type>::max() << ((PLF_TYPE_BITWIDTH * (shift != 0)) - shift);
+		buffer[PLF_ARRAY_CAPACITY - 1] |= static_cast<storage_type>(~(std::numeric_limits<storage_type>::max() >> (PLF_ARRAY_CAPACITY_BITS - total_size)));
 	}
 
 
@@ -392,8 +391,6 @@ public:
 
 	PLF_CONSTFUNC bool all_range(const size_type begin, const size_type end)
 	{
-		set_overflow_to_one();
-
 		if PLF_CONSTEXPR (hardened)
 		{
 			check_index_is_within_size(begin);
@@ -407,6 +404,8 @@ public:
 		{
 			return false;
 		}
+
+		set_overflow_to_one();
 
 		const size_type begin_type_index = begin / PLF_TYPE_BITWIDTH, end_type_index = (end - 1) / PLF_TYPE_BITWIDTH, begin_subindex = begin % PLF_TYPE_BITWIDTH, distance_to_end_storage = PLF_TYPE_BITWIDTH - (end % PLF_TYPE_BITWIDTH);
 
@@ -658,7 +657,7 @@ public:
 		const storage_type current_word = buffer[word_index] >> index;
 
 		if (current_word != 0) return (word_index * PLF_TYPE_BITWIDTH) + plf::countr_zero(current_word) + index;
-		if (++word_index == PLF_ARRAY_CAPACITY) return std::numeric_limits<storage_type>::max();
+		if (++word_index == PLF_ARRAY_CAPACITY) return std::numeric_limits<size_type>::max();
 		return search_one_forwards(word_index);
 	}
 
@@ -681,7 +680,7 @@ public:
 		const storage_type current_word = buffer[word_index] << ((PLF_TYPE_BITWIDTH - 1) - index);
 
 		if (current_word != 0) return ((word_index * PLF_TYPE_BITWIDTH) + index) - plf::countl_zero(current_word);
-		if (word_index == 0) return std::numeric_limits<storage_type>::max();
+		if (word_index == 0) return std::numeric_limits<size_type>::max();
 		return search_one_backwards(word_index - 1);
 	}
 
@@ -712,7 +711,12 @@ public:
 			return index;
 		}
 
-		if (++word_index == PLF_ARRAY_CAPACITY) return std::numeric_limits<size_type>::max();
+		if (++word_index == PLF_ARRAY_CAPACITY)
+		{
+			set_overflow_to_zero();
+			return std::numeric_limits<size_type>::max();
+		}
+
 		return search_zero_forwards(word_index);
 	}
 
@@ -743,7 +747,12 @@ public:
 			return index;
 		}
 
-		if (word_index == 0) return std::numeric_limits<size_type>::max();
+		if (word_index == 0)
+		{
+			set_overflow_to_zero();
+			return std::numeric_limits<size_type>::max();
+		}
+
 		return search_zero_backwards(word_index - 1);
 	}
 

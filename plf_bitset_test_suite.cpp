@@ -30,6 +30,41 @@ void failpass(const char *test_type, bool condition)
 
 
 
+template <std::size_t total_size, typename storage_type>
+void overflow_restore_test(const char *test_type)
+{
+	plf::bitset<total_size, storage_type> values;
+
+	values.set();
+	values.next_zero(total_size - 1);
+	const bool next_zero_ok = values.count() == total_size;
+
+	values.set();
+	values.prev_zero(0);
+	const bool prev_zero_ok = values.count() == total_size;
+
+	failpass(test_type, next_zero_ok && prev_zero_ok);
+}
+
+
+
+
+
+template <std::size_t total_size, typename storage_type>
+void exact_multiple_test(const char *test_type)
+{
+	plf::bitset<total_size, storage_type> values;
+	values.reset();
+
+	const bool reset_ok = !values.all() && values.first_zero() == 0 && values.last_zero() == total_size - 1 && values.count() == 0;
+
+	values.set();
+
+	const bool set_ok = values.all() && values.first_zero() == std::numeric_limits<std::size_t>::max() && values.count() == total_size;
+
+	failpass(test_type, reset_ok && set_ok);
+}
+
 
 
 int main()
@@ -73,6 +108,15 @@ int main()
 		}
 
 		failpass("Reset and count test", total == total2  && total2 == 0);
+
+		// total_size an exact multiple of the storage_type bitwidth leaves no overflow bits, so the overflow manipulation must be a no-op:
+		exact_multiple_test<sizeof(unsigned int) * 8, unsigned int>("Exact-multiple overflow test, one word/unsigned int");
+		exact_multiple_test<sizeof(unsigned int) * 16, unsigned int>("Exact-multiple overflow test, two words/unsigned int");
+		exact_multiple_test<sizeof(std::size_t) * 8, std::size_t>("Exact-multiple overflow test, one word/size_t");
+		exact_multiple_test<sizeof(std::size_t) * 16, std::size_t>("Exact-multiple overflow test, two words/size_t");
+		overflow_restore_test<2, unsigned int>("Overflow restore test, 2 bits/unsigned int");
+		overflow_restore_test<sizeof(unsigned int) * 8 + 1, unsigned int>("Overflow restore test, one word plus one/unsigned int");
+		overflow_restore_test<sizeof(std::size_t) * 16 - 1, std::size_t>("Overflow restore test, two words less one/size_t");
 
 		{
 			const unsigned int bitset_size = 584;
@@ -153,7 +197,7 @@ int main()
 		plf::bitset<134> and_values = values;
 		and_values &= flip_values;
 		plf::bitset<134> and_values2 = values & flip_values;
-		
+
 		failpass("And test", and_values.count() == 0 && and_values == and_values2);
 
 
@@ -224,6 +268,8 @@ int main()
 		failpass("all_range test 2", !or_values.all_range(90, 112) && or_values.all_range(34, 45));
 		failpass("none_range test 2", and_values.none_range(90, 99) && !and_values.none_range(129, 134));
 
+		failpass("all_range empty range test", !and_values.all_range(50, 50) && and_values.count() == 2);
+
 		failpass("first_one test", and_values.first_one() == 100);
 		failpass("next_one test", and_values.next_one(64) == 100);
 		failpass("next_one test", and_values.next_one(54) == 100);
@@ -254,17 +300,8 @@ int main()
 
 		for (unsigned int counter = 0; counter != 100000; ++counter)
 		{
-			const unsigned int start = (rand() % (bitset_size - 256)) + 128;
-			const unsigned int end = (bitset_size - start > 256)
-				? start + (rand() % (bitset_size - start - 256)) + 128
-				: bitset_size - 1;
-
-			const unsigned int test_range_start = start - (rand() % 128);
-			const unsigned int test_range_offset = rand() % 128;
-			const unsigned int test_range_end = (end + test_range_offset < bitset_size)
-				? end + test_range_offset
-				: bitset_size - 1;
-
+			const unsigned int start = (rand() % (bitset_size - 512)) + 128, end = start + (rand() % ((bitset_size - start) - 256)) + 128;
+			const unsigned int test_range_start = start - (rand() % 128), test_range_end = end + (rand() % 128);
 			values.set_range(start, end);
 			const unsigned int counted_range = values.count_range(test_range_start, test_range_end);
 
@@ -466,6 +503,23 @@ int main()
 		shift_values.shift_left_range(9, 7);
 
 		printf("After shift: %s\n", shift_values.to_rstring().c_str());
+	}
+
+
+	{
+		const std::size_t not_found = std::numeric_limits<std::size_t>::max();
+
+		plf::bitset<1000, unsigned char> values;
+		values.reset();
+		values.set(900);
+		failpass("prev_one not-found sentinel test", values.prev_one(3) == not_found);
+
+		// The zero-searching functions reach countr_one/countl_one, which do not yet support a
+		// storage_type narrower than int, so use the narrowest type they currently accept:
+		plf::bitset<1000, unsigned int> wide_values;
+		wide_values.set();
+		wide_values.reset(900);
+		failpass("prev_zero not-found sentinel test", wide_values.prev_zero(3) == not_found);
 	}
 
 
