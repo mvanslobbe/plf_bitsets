@@ -31,6 +31,27 @@ void failpass(const char *test_type, bool condition)
 
 
 template <std::size_t total_size, typename storage_type>
+void const_query_test(const char *test_type)
+{
+	plf::bitset<total_size, storage_type> values;
+	const plf::bitset<total_size, storage_type> &const_values = values;
+	const std::size_t none = std::numeric_limits<std::size_t>::max();
+
+	values.set();
+	const bool set_ok = const_values.all() && const_values.all_range(0, total_size - 1) && const_values.first_zero() == none && const_values.last_zero() == none && const_values.next_zero(0) == none && const_values.prev_zero(total_size - 1) == none;
+
+	values.reset(3);
+	values.reset(total_size - 2);
+	const bool partial_ok = !const_values.all() && const_values.all_range(4, total_size - 2) && !const_values.all_range(0, total_size - 1) && const_values.first_zero() == 3 && const_values.next_zero(4) == total_size - 2 && const_values.next_zero(total_size - 1) == none && const_values.last_zero() == total_size - 2 && const_values.prev_zero(total_size - 3) == 3 && const_values.prev_zero(2) == none;
+
+	failpass(test_type, set_ok && partial_ok && const_values.count() == total_size - 2);
+}
+
+
+
+
+
+template <std::size_t total_size, typename storage_type>
 void overflow_restore_test(const char *test_type)
 {
 	plf::bitset<total_size, storage_type> values;
@@ -117,6 +138,9 @@ int main()
 		overflow_restore_test<2, unsigned int>("Overflow restore test, 2 bits/unsigned int");
 		overflow_restore_test<sizeof(unsigned int) * 8 + 1, unsigned int>("Overflow restore test, one word plus one/unsigned int");
 		overflow_restore_test<sizeof(std::size_t) * 16 - 1, std::size_t>("Overflow restore test, two words less one/size_t");
+		const_query_test<sizeof(unsigned int) * 8 + 7, unsigned int>("Const query test, one word plus seven/unsigned int");
+		const_query_test<sizeof(std::size_t) * 16 - 1, std::size_t>("Const query test, two words less one/size_t");
+		const_query_test<sizeof(std::size_t) * 16, std::size_t>("Const query test, exact multiple/size_t");
 
 		{
 			const unsigned int bitset_size = 584;

@@ -37,6 +37,12 @@
 #define PLF_ARRAY_CAPACITY_BITS (PLF_ARRAY_CAPACITY * PLF_TYPE_BITWIDTH)
 #define PLF_ARRAY_CAPACITY_BYTES (PLF_ARRAY_CAPACITY * sizeof(storage_type))
 
+#if defined(__clang__) // Stops clang vectorizing a loop across its iterations, which it otherwise sometimes does for the 8-at-a-time search loops below using gather instructions, which are much slower than the unvectorized loop
+	#define PLF_NO_VECTORIZE _Pragma("clang loop vectorize(disable)")
+#else
+	#define PLF_NO_VECTORIZE
+#endif
+
 
 #include <cmath> // log10
 #include <cassert>
@@ -74,6 +80,170 @@ private:
 	PLF_CONSTFUNC void set_overflow_to_zero() PLF_NOEXCEPT
 	{ // set all bits > size to 0
 		buffer[PLF_ARRAY_CAPACITY - 1] &= std::numeric_limits<storage_type>::max() >> (PLF_ARRAY_CAPACITY_BITS - total_size);
+	}
+
+
+
+	PLF_CONSTFUNC storage_type last_word_with_overflow_set() const PLF_NOEXCEPT
+	{ // Returns the final storage_type with all bits > size set to 1, without modifying the buffer - allows const functions to use the same optimisation as set_overflow_to_one()
+		return static_cast<storage_type>(buffer[PLF_ARRAY_CAPACITY - 1] | ~(std::numeric_limits<storage_type>::max() >> (PLF_ARRAY_CAPACITY_BITS - total_size)));
+	}
+
+
+
+	// These find the first (or last) storage_type which isn't equal to skip_value. Combining storage_type's with XOR/OR before comparing is significantly faster than comparing each individually, so they check 8 storage_type's at a time, and 64 bytes at a time for storage types narrower than 8 bytes. A nearby result is checked for before going 64 bytes at a time, so it doesn't cost a full 64-byte check:
+
+	template <storage_type skip_value>
+	static PLF_CONSTFUNC bool group_differs(const storage_type * const group) PLF_NOEXCEPT
+	{ // ie. whether any of the 8 storage_type's starting at group differ from skip_value
+		return ((group[0] ^ skip_value) | (group[1] ^ skip_value) | (group[2] ^ skip_value) | (group[3] ^ skip_value) | (group[4] ^ skip_value) | (group[5] ^ skip_value) | (group[6] ^ skip_value) | (group[7] ^ skip_value)) != 0;
+	}
+
+
+
+	template <storage_type skip_value>
+	static PLF_CONSTFUNC const storage_type * locate_forwards(const storage_type *current) PLF_NOEXCEPT
+	{ // Only called when a storage_type differing from skip_value is known to be at or after current
+		while (*current == skip_value) ++current;
+		return current;
+	}
+
+
+
+	template <storage_type skip_value>
+	static PLF_CONSTFUNC const storage_type * locate_backwards(const storage_type *current) PLF_NOEXCEPT
+	{ // Only called when a storage_type differing from skip_value is known to be at or before current
+		while (*current == skip_value) --current;
+		return current;
+	}
+
+
+
+	template <storage_type skip_value>
+	static PLF_CONSTFUNC const storage_type * find_word_forwards(const storage_type *current, const storage_type * const end) PLF_NOEXCEPT
+	{ // Returns the first storage_type in [current, end) which differs from skip_value, or end if there isn't one
+		const size_type block_size = 64 / sizeof(storage_type);
+
+		if (end - current < 8)
+		{
+			while (current != end && *current == skip_value) ++current;
+			return current;
+		}
+
+		if PLF_CONSTEXPR (block_size > 8)
+		{
+			if (group_differs<skip_value>(current)) return locate_forwards<skip_value>(current);
+			current += 8;
+
+			for (; static_cast<size_type>(end - current) >= block_size; current += block_size)
+			{
+				storage_type combined = 0;
+				for (size_type index = 0; index != block_size; ++index) combined |= current[index] ^ skip_value;
+				if (combined != 0) break; // The group loop below finds the storage_type within this block
+			}
+		}
+
+		PLF_NO_VECTORIZE
+		for (; end - current >= 8; current += 8)
+		{
+			if (group_differs<skip_value>(current)) break; // The storage_type is located after the loop
+		}
+
+		if (end - current < 8)
+		{
+			if (current == end) return end;
+
+			// Check the remaining storage_type's as one group ending at end. This overlaps storage_type's which are already known to equal skip_value, but is faster than checking the remainder individually:
+			current = end - 8;
+			if (!group_differs<skip_value>(current)) return end;
+		}
+
+		return locate_forwards<skip_value>(current);
+	}
+
+
+
+	template <storage_type skip_value>
+	static PLF_CONSTFUNC bool all_words_equal(const storage_type *current, const storage_type * const end) PLF_NOEXCEPT
+	{ // ie. find_word_forwards(current, end) == end, but without the cost of locating a differing storage_type once one is known to exist
+		const size_type block_size = 64 / sizeof(storage_type);
+
+		if (end - current < 8)
+		{
+			for (; current != end; ++current)
+			{
+				if (*current != skip_value) return false;
+			}
+
+			return true;
+		}
+
+		if PLF_CONSTEXPR (block_size > 8)
+		{
+			for (; static_cast<size_type>(end - current) >= block_size; current += block_size)
+			{
+				storage_type combined = 0;
+				for (size_type index = 0; index != block_size; ++index) combined |= current[index] ^ skip_value;
+				if (combined != 0) return false;
+			}
+		}
+
+		PLF_NO_VECTORIZE
+		for (; end - current >= 8; current += 8)
+		{
+			if (group_differs<skip_value>(current)) return false;
+		}
+
+		return current == end || !group_differs<skip_value>(end - 8); // See find_word_forwards for the overlapping final group
+	}
+
+
+
+	template <storage_type skip_value>
+	static PLF_CONSTFUNC const storage_type * find_word_backwards(const storage_type * const begin, const storage_type *current) PLF_NOEXCEPT
+	{ // Returns the last storage_type in [begin, current) which differs from skip_value, or NULL if there isn't one
+		const size_type block_size = 64 / sizeof(storage_type);
+
+		if (current - begin < 8)
+		{
+			while (current != begin)
+			{
+				if (*--current != skip_value) return current;
+			}
+
+			return NULL;
+		}
+
+		if PLF_CONSTEXPR (block_size > 8)
+		{
+			if (group_differs<skip_value>(current - 8)) return locate_backwards<skip_value>(current - 1);
+			current -= 8;
+
+			for (; static_cast<size_type>(current - begin) >= block_size; current -= block_size)
+			{
+				storage_type combined = 0;
+				const storage_type * const block = current - block_size;
+				for (size_type index = 0; index != block_size; ++index) combined |= block[index] ^ skip_value;
+				if (combined != 0) break;
+			}
+		}
+
+		PLF_NO_VECTORIZE
+		for (; current - begin >= 8; current -= 8)
+		{
+			if (group_differs<skip_value>(current - 8)) break;
+		}
+
+		if (current - begin < 8)
+		{
+			if (current == begin) return NULL;
+
+			// As per find_word_forwards, check the remainder as one group starting at begin:
+			current = begin + 8;
+			if (!group_differs<skip_value>(begin)) return NULL;
+		}
+
+		return locate_backwards<skip_value>(current - 1);
 	}
 
 
@@ -336,26 +506,14 @@ public:
 
 
 
-	PLF_CONSTFUNC bool all() PLF_NOEXCEPT
+	PLF_CONSTFUNC bool all() const PLF_NOEXCEPT
 	{
-		set_overflow_to_one();
-
-		for (size_type current = 0, end = PLF_ARRAY_CAPACITY; current != end; ++current)
-		{
-			if (buffer[current] != std::numeric_limits<storage_type>::max())
-			{
-				set_overflow_to_zero();
-				return false;
-			}
-		}
-
-		set_overflow_to_zero();
-		return true;
+		return all_words_equal<static_cast<storage_type>(~storage_type())>(buffer, buffer + (PLF_ARRAY_CAPACITY - 1)) && last_word_with_overflow_set() == std::numeric_limits<storage_type>::max();
 	}
 
 
 
-	PLF_CONSTFUNC bool all_range(const size_type begin, const size_type end)
+	PLF_CONSTFUNC bool all_range(const size_type begin, const size_type end) const
 	{
 		if PLF_CONSTEXPR (hardened)
 		{
@@ -371,8 +529,6 @@ public:
 			return false;
 		}
 
-		set_overflow_to_one();
-
 		const size_type begin_type_index = begin / PLF_TYPE_BITWIDTH, end_type_index = (end - 1) / PLF_TYPE_BITWIDTH, begin_subindex = begin % PLF_TYPE_BITWIDTH, distance_to_end_storage = PLF_TYPE_BITWIDTH - (end % PLF_TYPE_BITWIDTH);
 
 		if (begin_type_index != end_type_index) // ie. if first and last bit to be set are not in the same storage_type unit
@@ -380,24 +536,18 @@ public:
 			// Check first storage_type:
 			if ((buffer[begin_type_index] | ~(std::numeric_limits<storage_type>::max() << begin_subindex)) != std::numeric_limits<storage_type>::max())
 			{
-				set_overflow_to_zero();
 				return false;
 			}
 
 			// Check all intermediate storage_type's (if any):
-			for (size_type current = begin_type_index + 1; current != end_type_index; ++current)
+			if (!all_words_equal<static_cast<storage_type>(~storage_type())>(buffer + begin_type_index + 1, buffer + end_type_index))
 			{
-				if (buffer[current] != std::numeric_limits<storage_type>::max())
-				{
-					set_overflow_to_zero();
-					return false;
-				}
+				return false;
 			}
 
 			// Write last storage_type:
 			if ((buffer[end_type_index] | ~(std::numeric_limits<storage_type>::max() >> distance_to_end_storage)) != std::numeric_limits<storage_type>::max())
 			{
-				set_overflow_to_zero();
 				return false;
 			}
 		}
@@ -405,12 +555,10 @@ public:
 		{
 			if ((buffer[begin_type_index] | ~((std::numeric_limits<storage_type>::max() << begin_subindex) & (std::numeric_limits<storage_type>::max() >> distance_to_end_storage))) != std::numeric_limits<storage_type>::max())
 			{
-				set_overflow_to_zero();
 				return false;
 			}
 		}
 
-		set_overflow_to_zero();
 		return true;
 	}
 
@@ -418,12 +566,7 @@ public:
 
 	PLF_CONSTFUNC bool any() const PLF_NOEXCEPT
 	{
-		for (size_type current = 0, end = PLF_ARRAY_CAPACITY; current != end; ++current)
-		{
-			if (buffer[current] != 0) return true;
-		}
-
-		return false;
+		return buffer[0] != 0 || !all_words_equal<0>(buffer + 1, buffer + PLF_ARRAY_CAPACITY); // See first_one() for why the first storage_type is checked on it's own
 	}
 
 
@@ -450,10 +593,7 @@ public:
 		{
 			if ((buffer[begin_type_index] & (std::numeric_limits<storage_type>::max() << begin_subindex)) != 0) return true;
 
-			for (size_type current = begin_type_index + 1; current != end_type_index; ++current)
-			{
-				if (buffer[current] != 0) return true;
-			}
+			if (!all_words_equal<0>(buffer + begin_type_index + 1, buffer + end_type_index)) return true;
 
 			if ((buffer[end_type_index] & (std::numeric_limits<storage_type>::max() >> distance_to_end_storage)) != 0) return true;
 		}
@@ -539,67 +679,37 @@ public:
 
 private:
 
-	PLF_CONSTFUNC size_type search_one_forwards(size_type word_index) const PLF_NOEXCEPT
+	PLF_CONSTFUNC size_type search_one_forwards(const size_type word_index) const PLF_NOEXCEPT
 	{
-		const size_type end = PLF_ARRAY_CAPACITY;
-
-		do
-		{
-			if (buffer[word_index] != 0) return (word_index * PLF_TYPE_BITWIDTH) + plf::countr_zero(buffer[word_index]);
-		} while (++word_index != end);
-
-		return std::numeric_limits<size_type>::max();
+		const storage_type * const found = find_word_forwards<0>(buffer + word_index, buffer + PLF_ARRAY_CAPACITY);
+		return (found == buffer + PLF_ARRAY_CAPACITY) ? std::numeric_limits<size_type>::max() : (static_cast<size_type>(found - buffer) * PLF_TYPE_BITWIDTH) + plf::countr_zero(*found);
 	}
 
 
 
-	PLF_CONSTFUNC size_type search_one_backwards(size_type word_index) const PLF_NOEXCEPT
+	PLF_CONSTFUNC size_type search_one_backwards(const size_type word_index) const PLF_NOEXCEPT
 	{
-		do
-		{
-			if (buffer[word_index] != 0) return (((word_index + 1) * PLF_TYPE_BITWIDTH) - plf::countl_zero(buffer[word_index])) - 1;
-		} while (word_index-- != 0);
-
-		return std::numeric_limits<size_type>::max();
+		const storage_type * const found = find_word_backwards<0>(buffer, buffer + word_index + 1);
+		return (found == NULL) ? std::numeric_limits<size_type>::max() : (((static_cast<size_type>(found - buffer) + 1) * PLF_TYPE_BITWIDTH) - plf::countl_zero(*found)) - 1;
 	}
 
 
 
-	PLF_CONSTFUNC size_type search_zero_forwards(size_type word_index) PLF_NOEXCEPT
-	{
-		const size_type end = PLF_ARRAY_CAPACITY;
-		size_type index = std::numeric_limits<size_type>::max();
+	PLF_CONSTFUNC size_type search_zero_forwards(const size_type word_index) const PLF_NOEXCEPT
+	{ // Overflow bits are always 0, so a zero found at or past total_size means there are no zeroes within the bitset
+		const storage_type * const found = find_word_forwards<static_cast<storage_type>(~storage_type())>(buffer + word_index, buffer + PLF_ARRAY_CAPACITY);
+		if (found == buffer + PLF_ARRAY_CAPACITY) return std::numeric_limits<size_type>::max();
 
-		do
-		{
-			if (buffer[word_index] != std::numeric_limits<storage_type>::max())
-			{
-				index = (word_index * PLF_TYPE_BITWIDTH) + plf::countr_one(buffer[word_index]);
-				break;
-			}
-		} while (++word_index != end);
-
-		set_overflow_to_zero();
-		return index;
+		const size_type index = (static_cast<size_type>(found - buffer) * PLF_TYPE_BITWIDTH) + plf::countr_one(*found);
+		return (index < total_size) ? index : std::numeric_limits<size_type>::max();
 	}
 
 
 
-	PLF_CONSTFUNC size_type search_zero_backwards(size_type word_index) PLF_NOEXCEPT
-	{
-		size_type index = std::numeric_limits<size_type>::max();
-
-		do
-		{
-			if (buffer[word_index] != std::numeric_limits<storage_type>::max())
-			{
-				index = (((word_index + 1) * PLF_TYPE_BITWIDTH) - plf::countl_one(buffer[word_index])) - 1;
-				break;
-			}
-		} while (word_index-- != 0);
-
-		set_overflow_to_zero();
-		return index;
+	PLF_CONSTFUNC size_type search_zero_backwards(const size_type word_index) const PLF_NOEXCEPT
+	{ // Must not be called on the final storage_type, as it doesn't account for overflow bits
+		const storage_type * const found = find_word_backwards<static_cast<storage_type>(~storage_type())>(buffer, buffer + word_index + 1);
+		return (found == NULL) ? std::numeric_limits<size_type>::max() : (((static_cast<size_type>(found - buffer) + 1) * PLF_TYPE_BITWIDTH) - plf::countl_one(*found)) - 1;
 	}
 
 
@@ -607,8 +717,9 @@ private:
 public:
 
 	PLF_CONSTFUNC size_type first_one() const PLF_NOEXCEPT
-	{
-		return search_one_forwards(0);
+	{ // Check the first storage_type on it's own, as the search's 8-at-a-time skipping is slower when the result is in the first storage_type
+		if (buffer[0] != 0) return plf::countr_zero(buffer[0]);
+		return search_one_forwards(1);
 	}
 
 
@@ -631,7 +742,11 @@ public:
 
 	PLF_CONSTFUNC size_type last_one() const PLF_NOEXCEPT
 	{
-		return search_one_backwards(PLF_ARRAY_CAPACITY - 1);
+		const storage_type last_word = buffer[PLF_ARRAY_CAPACITY - 1];
+
+		if (last_word != 0) return ((PLF_ARRAY_CAPACITY_BITS - plf::countl_zero(last_word)) - 1);
+		if (PLF_ARRAY_CAPACITY == 1) return std::numeric_limits<size_type>::max();
+		return search_one_backwards(PLF_ARRAY_CAPACITY - 2);
 	}
 
 
@@ -652,18 +767,22 @@ public:
 
 
 
-	PLF_CONSTFUNC size_type first_zero() PLF_NOEXCEPT
-	{
-		set_overflow_to_one();
-		return search_zero_forwards(0);
+	PLF_CONSTFUNC size_type first_zero() const PLF_NOEXCEPT
+	{ // See first_one() for why the first storage_type is checked on it's own
+		if (buffer[0] != std::numeric_limits<storage_type>::max())
+		{
+			const size_type index = plf::countr_one(buffer[0]);
+			return (index < total_size) ? index : std::numeric_limits<size_type>::max();
+		}
+
+		return search_zero_forwards(1);
 	}
 
 
 
-	PLF_CONSTFUNC size_type next_zero(size_type index) PLF_NOEXCEPT // note: we are searching from current position, not current position + 1
+	PLF_CONSTFUNC size_type next_zero(size_type index) const PLF_NOEXCEPT // note: we are searching from current position, not current position + 1
 	{
 		if (index >= total_size) return std::numeric_limits<size_type>::max();
-		set_overflow_to_one();
 
 		// Search within current buffer word:
 		size_type word_index = index / PLF_TYPE_BITWIDTH;
@@ -673,33 +792,30 @@ public:
 		if (current_word != std::numeric_limits<storage_type>::max())
 		{
 			index = (word_index * PLF_TYPE_BITWIDTH) + plf::countr_one(current_word);
-			set_overflow_to_zero();
-			return index;
+			return (index < total_size) ? index : std::numeric_limits<size_type>::max();
 		}
 
-		if (++word_index == PLF_ARRAY_CAPACITY)
-		{
-			set_overflow_to_zero();
-			return std::numeric_limits<size_type>::max();
-		}
+		if (++word_index == PLF_ARRAY_CAPACITY) return std::numeric_limits<size_type>::max();
 
 		return search_zero_forwards(word_index);
 	}
 
 
 
-	PLF_CONSTFUNC size_type last_zero() PLF_NOEXCEPT
+	PLF_CONSTFUNC size_type last_zero() const PLF_NOEXCEPT
 	{
-		set_overflow_to_one();
-		return search_zero_backwards(PLF_ARRAY_CAPACITY - 1);
+		const storage_type last_word = last_word_with_overflow_set();
+
+		if (last_word != std::numeric_limits<storage_type>::max()) return ((PLF_ARRAY_CAPACITY_BITS - plf::countl_one(last_word)) - 1);
+		if (PLF_ARRAY_CAPACITY == 1) return std::numeric_limits<size_type>::max();
+		return search_zero_backwards(PLF_ARRAY_CAPACITY - 2);
 	}
 
 
 
-	PLF_CONSTFUNC size_type prev_zero(size_type index) PLF_NOEXCEPT
+	PLF_CONSTFUNC size_type prev_zero(size_type index) const PLF_NOEXCEPT
 	{
 		if (index >= total_size) return std::numeric_limits<size_type>::max();
-		set_overflow_to_one();
 
 		size_type word_index = index / PLF_TYPE_BITWIDTH;
 		index %= PLF_TYPE_BITWIDTH;
@@ -708,16 +824,10 @@ public:
 
 		if (current_word != std::numeric_limits<storage_type>::max())
 		{
-			index = (((word_index + 1) * PLF_TYPE_BITWIDTH) - plf::countl_one(current_word)) - 1;
-			set_overflow_to_zero();
-			return index;
+			return (((word_index + 1) * PLF_TYPE_BITWIDTH) - plf::countl_one(current_word)) - 1;
 		}
 
-		if (word_index == 0)
-		{
-			set_overflow_to_zero();
-			return std::numeric_limits<size_type>::max();
-		}
+		if (word_index == 0) return std::numeric_limits<size_type>::max();
 
 		return search_zero_backwards(word_index - 1);
 	}
@@ -1277,6 +1387,7 @@ namespace std
 #undef PLF_ARRAY_CAPACITY
 #undef PLF_ARRAY_CAPACITY_BITS
 #undef PLF_ARRAY_CAPACITY_BYTES
+#undef PLF_NO_VECTORIZE
 
 #ifdef PLF_BITSETB_DEFINES
 	#include "plf_tools_undef.h"
