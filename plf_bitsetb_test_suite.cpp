@@ -189,6 +189,27 @@ void exact_multiple_test(const char *test_type)
 
 
 
+template <typename storage_type>
+void shift_left_range_aligned_test(const char *test_type)
+{ // 'first' on a word boundary: the bit below it stays, the bit at it is shifted out, the one above moves down
+	const std::size_t word = sizeof(storage_type) * 8;
+	plf::bitsetb<false, storage_type> values(sizeof(storage_type) * 32);
+	values.reset();
+	values.set(word / 2);
+	values.set(word);
+	values.set(word + 6);
+	plf::bitsetb<false, storage_type> single(values);
+
+	values.shift_left_range(1, word);
+	single.shift_left_range_one(word);
+
+	failpass(test_type, values.count() == 2 && values[word / 2] && values[word + 5] && single.count() == 2 && single[word / 2] && single[word + 5]);
+}
+
+
+
+
+
 int main()
 {
 	{
@@ -240,6 +261,9 @@ int main()
 		all_range_narrow_test<unsigned short>("all_range narrow storage test/unsigned short");
 		count_range_narrow_test<unsigned char>("count_range narrow storage test/unsigned char");
 		count_range_narrow_test<unsigned short>("count_range narrow storage test/unsigned short");
+		shift_left_range_aligned_test<unsigned char>("shift_left_range word-aligned first test/unsigned char");
+		shift_left_range_aligned_test<unsigned int>("shift_left_range word-aligned first test/unsigned int");
+		shift_left_range_aligned_test<std::size_t>("shift_left_range word-aligned first test/size_t");
 		overflow_restore_test<2, unsigned int>("Overflow restore test, 2 bits/unsigned int");
 		overflow_restore_test<sizeof(unsigned int) * 8 + 1, unsigned int>("Overflow restore test, one word plus one/unsigned int");
 		overflow_restore_test<sizeof(std::size_t) * 16 - 1, std::size_t>("Overflow restore test, two words less one/size_t");

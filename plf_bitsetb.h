@@ -986,9 +986,9 @@ public:
 			buffer[end] >>= shift_amount;
 		}
 
-		// Restore X bits to first word
-		const storage_type remainder = static_cast<storage_type>(first - (first_word_index * PLF_TYPE_BITWIDTH));
-  		buffer[first_word_index] = (buffer[first_word_index] & (std::numeric_limits<storage_type>::max() << remainder)) | (first_word & (std::numeric_limits<storage_type>::max() >> (PLF_TYPE_BITWIDTH - remainder)));
+		// Restore X bits to first word. The mask for the bits below 'first' is the complement of the mask for the rest, rather than max() >> (PLF_TYPE_BITWIDTH - remainder), which would shift by the full bitwidth when first is a multiple of it:
+		const storage_type remainder = static_cast<storage_type>(first - (first_word_index * PLF_TYPE_BITWIDTH)), upper_mask = static_cast<storage_type>(std::numeric_limits<storage_type>::max() << remainder);
+		buffer[first_word_index] = static_cast<storage_type>((buffer[first_word_index] & upper_mask) | (first_word & static_cast<storage_type>(~upper_mask)));
 	}
 
 
@@ -1008,9 +1008,9 @@ public:
 
 		buffer[end] >>= 1;
 
-		// Restore X bits to first word
-		const storage_type remainder = static_cast<storage_type>(first - (first_word_index * PLF_TYPE_BITWIDTH));
-  		buffer[first_word_index] = (buffer[first_word_index] & (std::numeric_limits<storage_type>::max() << remainder)) | (first_word & (std::numeric_limits<storage_type>::max() >> (PLF_TYPE_BITWIDTH - remainder)));
+		// Restore X bits to first word. The mask for the bits below 'first' is the complement of the mask for the rest, rather than max() >> (PLF_TYPE_BITWIDTH - remainder), which would shift by the full bitwidth when first is a multiple of it:
+		const storage_type remainder = static_cast<storage_type>(first - (first_word_index * PLF_TYPE_BITWIDTH)), upper_mask = static_cast<storage_type>(std::numeric_limits<storage_type>::max() << remainder);
+		buffer[first_word_index] = static_cast<storage_type>((buffer[first_word_index] & upper_mask) | (first_word & static_cast<storage_type>(~upper_mask)));
 	}
 
 
