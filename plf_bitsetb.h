@@ -32,7 +32,7 @@
 
 
 #define PLF_TYPE_BITWIDTH (sizeof(storage_type) * 8)
-#define PLF_ARRAY_CAPACITY_CALC(bitset_size) ((bitset_size + PLF_TYPE_BITWIDTH - 1) / PLF_TYPE_BITWIDTH) // ie. round up to nearest unit of storage
+#define PLF_ARRAY_CAPACITY_CALC(bitset_size) (((bitset_size) + PLF_TYPE_BITWIDTH - 1) / PLF_TYPE_BITWIDTH) // ie. round up to nearest unit of storage
 #define PLF_ARRAY_CAPACITY ((total_size + PLF_TYPE_BITWIDTH - 1) / PLF_TYPE_BITWIDTH)
 #define PLF_ARRAY_CAPACITY_BITS (PLF_ARRAY_CAPACITY * PLF_TYPE_BITWIDTH)
 #define PLF_ARRAY_CAPACITY_BYTES (PLF_ARRAY_CAPACITY * sizeof(storage_type))
