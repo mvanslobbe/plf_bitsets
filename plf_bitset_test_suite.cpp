@@ -191,6 +191,24 @@ void exact_multiple_test(const char *test_type)
 
 
 
+template <std::size_t total_size>
+void hardened_operators_test(const char *test_type)
+{ // ~, >> and << build a temporary copy, which must be of the same type, hardened included
+	plf::bitset<total_size, std::size_t, true> values;
+	values.reset();
+	values.set(1);
+	values.set(total_size - 1);
+
+	const plf::bitset<total_size, std::size_t, true> flipped = ~values, right = values >> 1, left = values << 1;
+	const bool ok = flipped.count() == total_size - 2 && !flipped[1] && right.count() == 2 && right[0] && right[total_size - 2] && left.count() == 1 && left[2];
+
+	failpass(test_type, ok);
+}
+
+
+
+
+
 int main()
 {
 	{
@@ -248,6 +266,8 @@ int main()
 		all_range_narrow_test<unsigned short>("all_range narrow storage test/unsigned short");
 		count_range_narrow_test<unsigned char>("count_range narrow storage test/unsigned char");
 		count_range_narrow_test<unsigned short>("count_range narrow storage test/unsigned short");
+		hardened_operators_test<100>("Hardened ~, >> and << test, 100 bits");
+		hardened_operators_test<sizeof(std::size_t) * 8>("Hardened ~, >> and << test, one word");
 		overflow_restore_test<2, unsigned int>("Overflow restore test, 2 bits/unsigned int");
 		overflow_restore_test<sizeof(unsigned int) * 8 + 1, unsigned int>("Overflow restore test, one word plus one/unsigned int");
 		overflow_restore_test<sizeof(std::size_t) * 16 - 1, std::size_t>("Overflow restore test, two words less one/size_t");

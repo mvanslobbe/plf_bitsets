@@ -775,7 +775,7 @@ public:
 
 	PLF_CONSTFUNC bitset operator ~ () const
 	{
-		bitset<total_size, storage_type> temp(*this);
+		bitset temp(*this); // the injected class name keeps all template arguments, including hardened
 		temp.flip();
 		return temp;
 	}
@@ -849,7 +849,7 @@ public:
 
 	PLF_CONSTFUNC bitset operator >> (const size_type shift_amount) const
 	{
-		bitset<total_size, storage_type> temp(*this);
+		bitset temp(*this); // the injected class name keeps all template arguments, including hardened
 		return temp >>= shift_amount;
 	}
 
@@ -999,7 +999,7 @@ public:
 
 	PLF_CONSTFUNC bitset operator << (const size_type shift_amount) const
 	{
-		bitset<total_size, storage_type> temp(*this);
+		bitset temp(*this); // the injected class name keeps all template arguments, including hardened
 		return temp <<= shift_amount;
 	}
 
