@@ -79,18 +79,25 @@ private:
 
 
 
+	PLF_CONSTFUNC void range_check(const size_type index) const
+	{ // Unconditional, for test(), which checks bounds whether hardened or not
+		if (index >= total_size)
+		{
+			#ifdef PLF_EXCEPTIONS_SUPPORT
+				throw std::out_of_range("Index larger than size of bitset");
+			#else
+				std::terminate();
+			#endif
+		}
+	}
+
+
+
 	PLF_CONSTFUNC void check_index_is_within_size(const size_type index) const
 	{
-		if PLF_CONSTFUNC (hardened)
+		if PLF_CONSTEXPR (hardened)
 		{
-			if (index >= total_size)
-			{
-				#ifdef PLF_EXCEPTIONS_SUPPORT
-					throw std::out_of_range("Index larger than size of bitset");
-				#else
-					std::terminate();
-				#endif
-			}
+			range_check(index);
 		}
 	}
 
@@ -153,7 +160,7 @@ public:
 
 	PLF_CONSTFUNC bool test(const size_type index) const
 	{
-		if PLF_CONSTEXPR (!hardened) check_index_is_within_size(index); // If hardened, will be checked in []
+		if PLF_CONSTEXPR (!hardened) range_check(index); // If hardened, will be checked in []. check_index_is_within_size() would do nothing here, since it only checks when hardened
 		return operator [](index);
 	}
 

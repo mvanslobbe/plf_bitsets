@@ -1,4 +1,5 @@
 #include <cstdio>
+#include <stdexcept>
 #include "plf_bitsetb.h"
 
 
@@ -189,6 +190,23 @@ void exact_multiple_test(const char *test_type)
 
 
 
+template <typename bitset_type>
+void test_bounds_test(const char *test_type, bitset_type &values, const std::size_t total_size)
+{ // test() checks bounds whether the bitset is hardened or not, as std::bitset::test does
+	values.reset();
+	values.set(total_size - 1);
+	bool in_range_ok = values.test(total_size - 1) && !values.test(0), threw_at_size = false, threw_far = false;
+
+	try { values.test(total_size); } catch (const std::out_of_range &) { threw_at_size = true; }
+	try { values.test(total_size * 1000); } catch (const std::out_of_range &) { threw_far = true; }
+
+	failpass(test_type, in_range_ok && threw_at_size && threw_far);
+}
+
+
+
+
+
 int main()
 {
 	{
@@ -240,6 +258,12 @@ int main()
 		all_range_narrow_test<unsigned short>("all_range narrow storage test/unsigned short");
 		count_range_narrow_test<unsigned char>("count_range narrow storage test/unsigned char");
 		count_range_narrow_test<unsigned short>("count_range narrow storage test/unsigned short");
+		{
+			plf::bitsetb<> unhardened(134);
+			test_bounds_test("test() bounds check test/unhardened", unhardened, 134);
+			plf::bitsetb<false, std::size_t, std::allocator<std::size_t>, true> hardened(134);
+			test_bounds_test("test() bounds check test/hardened", hardened, 134);
+		}
 		overflow_restore_test<2, unsigned int>("Overflow restore test, 2 bits/unsigned int");
 		overflow_restore_test<sizeof(unsigned int) * 8 + 1, unsigned int>("Overflow restore test, one word plus one/unsigned int");
 		overflow_restore_test<sizeof(std::size_t) * 16 - 1, std::size_t>("Overflow restore test, two words less one/size_t");
